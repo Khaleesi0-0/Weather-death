@@ -1,0 +1,393 @@
+---
+title: "weather"
+output: html_document
+date: "2025-11-30"
+---
+```{r}
+library(noaa)
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(openmeteo)
+```
+```{r}
+state_coords <- data.frame(
+  state = c(
+    "Alabama","Alaska","Arizona","Arkansas","California",
+    "Colorado","Connecticut","Delaware","Florida","Georgia",
+    "Hawaii","Idaho","Illinois","Indiana","Iowa",
+    "Kansas","Kentucky","Louisiana","Maine","Maryland",
+    "Massachusetts","Michigan","Minnesota","Mississippi","Missouri",
+    "Montana","Nebraska","Nevada","New Hampshire","New Jersey",
+    "New Mexico","New York","North Carolina","North Dakota","Ohio",
+    "Oklahoma","Oregon","Pennsylvania","Rhode Island","South Carolina",
+    "South Dakota","Tennessee","Texas","Utah","Vermont",
+    "Virginia","Washington","West Virginia","Wisconsin","Wyoming"
+  ),
+  lat = c(
+    32.37, 58.30, 33.45, 34.75, 38.58,
+    39.74, 41.76, 39.74, 30.44, 33.75,
+    21.31, 43.62, 39.80, 39.77, 41.59,
+    39.04, 38.20, 30.46, 44.31, 39.29,
+    42.36, 42.73, 44.95, 32.30, 38.57,
+    46.59, 40.81, 39.16, 43.21, 40.22,
+    35.69, 42.65, 35.78, 46.81, 39.96,
+    35.47, 44.94, 40.27, 41.82, 34.00,
+    44.37, 36.17, 30.27, 40.76, 44.26,
+    37.54, 47.04, 38.35, 43.07, 41.14
+  ),
+  lon = c(
+    -86.30, -134.42, -112.07, -92.29, -121.49,
+    -104.99, -72.68, -75.55, -84.28, -84.39,
+    -157.86, -116.21, -89.65, -86.16, -93.62,
+    -95.69, -84.87, -91.14, -69.78, -76.61,
+    -71.06, -84.56, -93.09, -90.18, -92.17,
+    -112.02, -96.70, -119.77, -71.54, -74.76,
+    -105.94, -73.76, -78.64, -100.78, -82.99,
+    -97.52, -123.03, -76.88, -71.41, -81.03,
+    -100.35, -86.78, -97.74, -111.89, -72.58,
+    -77.43, -122.90, -81.63, -89.40, -104.82
+  ),
+  stringsAsFactors = FALSE
+)
+
+## ------------------------------------------------------------
+## 2. Date range and API helper function
+## ------------------------------------------------------------
+
+start_date <- "2018-01-01"
+end_date   <- "2024-12-31"
+
+get_state_daily <- function(state_name, lat, lon) {
+  message("Fetching daily data for ", state_name, " ...")
+  
+  resp <- GET(
+    url   = "https://archive-api.open-meteo.com/v1/archive",
+    query = list(
+      latitude   = lat,
+      longitude  = lon,
+      start_date = start_date,
+      end_date   = end_date,
+      daily      = "temperature_2m_mean",
+      timezone   = "auto"
+    )
+  )
+  
+  if (http_error(resp)) {
+    stop("Weather error for ", state_name, ": ",
+         status_code(resp), " - ", content(resp, "text"))
+  }
+  
+  dat <- fromJSON(content(resp, "text", encoding = "UTF-8"))
+  
+  if (is.null(dat$daily)) {
+    warning("No daily data for ", state_name)
+    return(NULL)
+  }
+  
+  # daily$time is a vector of dates; temperature_2m_mean matches length
+  tibble(
+    state = state_name,
+    date  = as.Date(dat$daily$time),
+    tmean_C = dat$daily$temperature_2m_mean  # degrees Celsius
+  )
+}
+
+## ------------------------------------------------------------
+## 3. Loop over all states and combine daily data
+## ------------------------------------------------------------
+
+all_daily <- vector("list", nrow(state_coords))
+
+for (i in seq_len(nrow(state_coords))) {
+  s   <- state_coords$state[i]
+  lat <- state_coords$lat[i]
+  lon <- state_coords$lon[i]
+  
+  success <- FALSE
+  attempt <- 1
+  
+  while (!success) {
+    message("Fetching ", s, " (attempt ", attempt, ") ...")
+    
+    resp <- try(
+      GET(
+        url   = "https://archive-api.open-meteo.com/v1/archive",
+        query = list(
+          latitude   = lat,
+          longitude  = lon,
+          start_date = start_date,
+          end_date   = end_date,
+          daily      = "temperature_2m_mean",
+          timezone   = "auto"
+        )
+      ),
+      silent = TRUE
+    )
+    
+    # If GET failed entirely
+    if (inherits(resp, "try-error")) {
+      message("GET error, retrying in 5 sec...")
+      Sys.sleep(5)
+      attempt <- attempt + 1
+      next
+    }
+    
+    # If API limit exceeded → retry after waiting
+    if (status_code(resp) == 429) {
+      message("Rate limit hit. Waiting 10 sec before retry...")
+      Sys.sleep(10)
+      attempt <- attempt + 1
+      next
+    }
+    
+    # If other http error → stop
+    if (http_error(resp)) {
+      stop("Fatal error for ", s, ": ", status_code(resp), " - ",
+           content(resp, "text", encoding = "UTF-8"))
+    }
+    
+    # Parse response
+    dat <- fromJSON(content(resp, "text", encoding = "UTF-8"))
+    
+    if (is.null(dat$daily)) {
+      warning("No data for ", s)
+      all_daily[[i]] <- NULL
+      success <- TRUE
+      next
+    }
+    
+    all_daily[[i]] <- tibble(
+      state = s,
+      date  = as.Date(dat$daily$time),
+      tmean_C = dat$daily$temperature_2m_mean
+    )
+    
+    success <- TRUE
+    
+    # Small pause before next state
+    Sys.sleep(2)
+  }
+}
+
+
+daily_temps <- bind_rows(all_daily)
+
+weekly_temps <- daily_temps %>%
+  mutate(week_start = floor_date(date, "week", week_start = 1)) %>%
+  group_by(state, week_start) %>%
+  summarise(
+    tmean_week_C = mean(tmean_C, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(tmean_week_F = tmean_week_C * 9/5 + 32)
+
+```
+
+
+`
+```{r}
+write.csv(weekly_temps,"weekly_temp.csv")
+```
+
+```{r}
+library(readr)
+death <- read_csv("death.csv")
+weather <- read_csv("weekly_temp.csv")
+
+glimpse(death)
+```
+```{r}
+death_clean <- death %>%
+  rename(
+    state     = `Occurrence State`,
+    week_code = `MMWR Week Code`
+  )
+```
+
+```{r}
+weather_clean <- weather %>%
+  # if your column is named differently, change week_start here
+  mutate(
+    year  = year(week_start),
+    week  = sprintf("%02d", isoweek(week_start)),  # 1 → "01", etc.
+    week_code = paste0(year, "/", week)
+  ) %>%
+  select(state, week_code, everything())
+
+```
+
+```{r}
+death_weather <- death_clean %>%
+  left_join(
+    weather_clean,
+    by = c("state", "week_code")
+  )
+
+glimpse(death_weather)
+```
+```{r}
+clean_df <- death_weather %>%
+  select(
+    state,
+    week_code,
+    week_start,
+    Deaths,
+    tmean_week_C,
+    tmean_week_F
+  )
+```
+
+```{r}
+poisson_model <- glm(
+  Deaths ~ tmean_week_C,
+  data = clean_df,
+  family = poisson(link = "log")
+)
+
+summary(poisson_model)
+
+```
+
+```{r}
+install.packages("MASS")
+library(MASS)
+
+nb_model <- glm.nb(
+  Deaths ~ tmean_week_C,
+  data = clean_df
+)
+
+summary(nb_model)
+
+total_deaths <- clean_df %>%
+  summarise(total = sum(Deaths, na.rm = TRUE))
+
+total_deaths
+```
+```{r}
+nb_model_state <- glm.nb(
+  Deaths ~ tmean_week_C + state,
+  data = clean_df
+)
+
+summary(nb_model_state)
+
+```
+
+```{r}
+library(broom)
+clean_df <- clean_df %>%
+  mutate(state = factor(state))
+
+## ============================================================
+## 2. Fit Negative Binomial Model with state fixed effects
+## ============================================================
+
+nb_model_state <- glm.nb(
+  Deaths ~ tmean_week_C + state,
+  data = clean_df
+)
+
+summary(nb_model_state)
+
+## ============================================================
+## 3. Extract raw state coefficients (no exp())
+## ============================================================
+
+coefs <- broom::tidy(nb_model_state)
+
+
+
+```
+```{r}
+state_effects <- coefs %>%
+  dplyr::filter(grepl("^state", term)) %>%
+  dplyr::mutate(
+    state    = gsub("^state", "", term),   # strip "state" prefix
+    coef_raw = estimate                    # keep raw log-coef
+  ) %>%
+  dplyr::select(state, coef_raw)
+
+# 3. Add the reference state (the one with no "stateXXX" term → coef = 0)
+all_states    <- levels(clean_df$state)
+missing_state <- setdiff(all_states, state_effects$state)
+
+state_effects <- dplyr::bind_rows(
+  state_effects,
+  tibble::tibble(
+    state    = missing_state,
+    coef_raw = 0
+  )
+)
+
+# 4. Get US map and join with state effects
+us_map <- ggplot2::map_data("state") %>%
+  dplyr::rename(state = region) %>%
+  dplyr::mutate(state = tolower(state))
+
+state_effects_map <- state_effects %>%
+  dplyr::mutate(state = tolower(state))
+
+map_df <- us_map %>%
+  dplyr::left_join(state_effects_map, by = "state")
+
+# 5. Plot the map with a diverging color scale centered at 0
+ggplot(map_df, aes(long, lat, group = group, fill = coef_raw)) +
+  geom_polygon(color = "white", size = 0.2) +
+  coord_fixed(1.3) +
+  scale_fill_gradient2(
+    low = "#2c7bb6",   # blue = lower than reference
+    mid = "white",     # white = similar to reference
+    high = "#d7191c",  # red = higher than reference
+    midpoint = 0,
+    name = "State coef\n(log scale)"
+  ) +
+  labs(
+    title = "State-Level Mortality Baseline (Negative Binomial Model)",
+    subtitle = "Raw state coefficients (relative to reference state)"
+  ) +
+  theme_void() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+```
+
+
+```{r}
+library(maps)
+library(ggplot2)
+
+us_states_map <- map_data("state") %>%
+  rename(state = region)
+
+coef_df$state <- tolower(coef_df$state)
+
+map_df <- us_states_map %>%
+  left_join(coef_df, by = "state")
+
+```
+
+```{r}
+ggplot(map_df, aes(long, lat, group = group, fill = estimate)) +
+  geom_polygon(color = "white", size = 0.2) +
+  coord_fixed(1.3) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    name = "Mortality Ratio\n(exp(coef))"
+  ) +
+  labs(
+    title = "State-Level Mortality Baseline (Negative Binomial Model)",
+    subtitle = "exp(state coefficient) compared to reference state",
+    x = "",
+    y = ""
+  ) +
+  theme_void() +
+  theme(legend.position = "right")
+
+```
+
