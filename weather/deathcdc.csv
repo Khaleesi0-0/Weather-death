@@ -1,0 +1,76 @@
+"Notes","Occurrence State","Occurrence State Code","Ten-Year Age Groups","Ten-Year Age Groups Code","MMWR Week","MMWR Week Code","Sex","Sex Code","Single Race 6","Single Race 6 Code",Deaths,Population,Crude Rate
+,"California","06","55-64 years","55-64","2018 Week 09 ending March 03, 2018","2018/09","Male","M","White","2106-3",12,Not Applicable,Not Applicable
+,"California","06","55-64 years","55-64","2020 Week 06 ending February 08, 2020","2020/06","Male","M","White","2106-3",12,Not Applicable,Not Applicable
+,"California","06","55-64 years","55-64","2020 Week 29 ending July 18, 2020","2020/29","Male","M","White","2106-3",10,Not Applicable,Not Applicable
+,"California","06","55-64 years","55-64","2021 Week 36 ending September 11, 2021","2021/36","Male","M","White","2106-3",11,Not Applicable,Not Applicable
+,"California","06","55-64 years","55-64","2021 Week 40 ending October 09, 2021","2021/40","Male","M","White","2106-3",12,Not Applicable,Not Applicable
+,"California","06","55-64 years","55-64","2023 Week 07 ending February 18, 2023","2023/07","Male","M","White","2106-3",11,Not Applicable,Not Applicable
+,"California","06","55-64 years","55-64","2023 Week 09 ending March 04, 2023","2023/09","Male","M","White","2106-3",10,Not Applicable,Not Applicable
+,"Florida","12","55-64 years","55-64","2022 Week 10 ending March 12, 2022","2022/10","Male","M","White","2106-3",12,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2018 Week 01 ending January 06, 2018","2018/01","Male","M","White","2106-3",11,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2018 Week 25 ending June 23, 2018","2018/25","Male","M","White","2106-3",12,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2018 Week 52 ending December 29, 2018","2018/52","Male","M","White","2106-3",14,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2019 Week 01 ending January 05, 2019","2019/01","Male","M","White","2106-3",10,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2019 Week 04 ending January 26, 2019","2019/04","Male","M","White","2106-3",11,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2019 Week 05 ending February 02, 2019","2019/05","Male","M","White","2106-3",10,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2019 Week 12 ending March 23, 2019","2019/12","Male","M","White","2106-3",10,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2019 Week 47 ending November 23, 2019","2019/47","Male","M","White","2106-3",10,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2020 Week 18 ending May 02, 2020","2020/18","Male","M","White","2106-3",10,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2020 Week 40 ending October 03, 2020","2020/40","Male","M","White","2106-3",10,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2021 Week 02 ending January 16, 2021","2021/02","Male","M","White","2106-3",10,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2021 Week 09 ending March 06, 2021","2021/09","Male","M","White","2106-3",11,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2021 Week 33 ending August 21, 2021","2021/33","Male","M","White","2106-3",11,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2022 Week 01 ending January 08, 2022","2022/01","Male","M","White","2106-3",10,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2022 Week 03 ending January 22, 2022","2022/03","Female","F","White","2106-3",11,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2022 Week 06 ending February 12, 2022","2022/06","Male","M","White","2106-3",13,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2022 Week 14 ending April 09, 2022","2022/14","Male","M","White","2106-3",10,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2023 Week 12 ending March 25, 2023","2023/12","Male","M","White","2106-3",11,Not Applicable,Not Applicable
+,"Texas","48","55-64 years","55-64","2023 Week 22 ending June 03, 2023","2023/22","Male","M","White","2106-3",10,Not Applicable,Not Applicable
+"---"
+"Dataset: Provisional Mortality Statistics, 2018 through Last Week"
+"Query Parameters:"
+"MMWR Year/Week: 2018; 2019; 2020; 2021; 2022; 2023"
+"Ten-Year Age Groups: 55-64 years"
+"UCD - ICD-10 Codes: N17-N19 (Renal failure)"
+"Group By: Occurrence State; Ten-Year Age Groups; MMWR Week; Sex; Single Race 6"
+"Show Totals: Disabled"
+"Show Zero Values: Disabled"
+"Show Suppressed: False"
+"Calculate Rates Per: 100,000"
+"Rate Options: Default intercensal populations for years 2001-2009 (except Infant Age Groups)"
+"---"
+"Help: See http://wonder.cdc.gov/wonder/help/mcd-provisional.html for more information."
+"---"
+"Query Date: Nov 30, 2025 5:21:23 PM"
+"---"
+"Suggested Citation: Centers for Disease Control and Prevention, National Center for Health Statistics. National Vital Statistics"
+"System, Provisional Mortality on CDC WONDER Online Database. Data are from the final Multiple Cause of Death Files, 2018-2023,"
+"and from provisional data for years 2024 and later, as compiled from data provided by the 57 vital statistics jurisdictions"
+"through the Vital Statistics Cooperative Program. Accessed at http://wonder.cdc.gov/mcd-icd10-provisional.html on Nov 30, 2025"
+"5:21:23 PM"
+"---"
+Messages:
+"1. The full results are too long to be displayed. Due to suppression constraints rows that are zero, suppressed or a total will"
+"not be available."
+"---"
+Caveats:
+"1. Population and rates are labeled 'Not Applicable' when location of Death's Occurrence, Autopsy, Place of Death, Weekday or"
+"Month are grouped by or limited, due to lack of a valid population. More information:"
+"http://wonder.cdc.gov/wonder/help/mcd-provisional.html#NotApplicableRates."
+"2. Death rates are flagged as Unreliable when the rate is calculated with a numerator of 20 or less. More information:"
+"http://wonder.cdc.gov/wonder/help/mcd-provisional.html#Unreliable."
+"3. Deaths of persons with Age ""Not Stated"" are included in ""All"" counts and rates, but are not distributed among age groups,"
+"so are not included in age-specific counts, age-specific rates or in any age-adjusted rates. More information:"
+"http://wonder.cdc.gov/wonder/help/mcd-provisional.html#Not Stated."
+"4. Connecticut population estimates for 2022 and later years are reported for 9 planning regions as county equivalent areas,"
+"instead of the former 8 legacy counties in the Vintage 2022 postcensal series released by the Census Bureau on June 22, 2023,"
+"and in the Vintage 2023 postcensal series released by the Census Bureau on June 27, 2024. Populations estimates for the former"
+"counties are not available for 2022 and later years. More information:"
+"http://wonder.cdc.gov/wonder/help/mcd-provisional.html#Connecticut-2022."
+"5. After the creation of the final 2023 dataset, North Carolina updated the cause of death information for over 900 death"
+"certificates to include a cause of death code indicating drug overdose (ICD-10 underlying cause-of-death codes: X40-X44,"
+"X60-X64, X85, and Y10-Y14). Jurisdictions can continue to update death certificates after the closing of the mortality file. As"
+"a result, users should consider that the actual death count for drug overdose deaths for North Carolina in 2023 is over 4,400"
+"deaths, with a crude rate of approximately 41.0 per 100,000 population, and an age-adjusted rate of approximately 42.1 per"
+"100,000 population. These deaths will not be updated on the final mortality datasets."
+"6. Deaths occurring through September 20, 2025 as of September 28, 2025."

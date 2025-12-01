@@ -57,7 +57,7 @@ state_coords <- data.frame(
 ## 2. Date range and API helper function
 ## ------------------------------------------------------------
 
-start_date <- "2018-01-01"
+start_date <- "2004-01-01"
 end_date   <- "2024-12-31"
 
 get_state_daily <- function(state_name, lat, lon) {
@@ -205,6 +205,17 @@ death_clean <- death %>%
     state     = `Occurrence State`,
     week_code = `MMWR Week Code`
   )
+
+death_clean %>%
+  count(state) %>%
+  arrange(n)
+```
+```{r}
+rare_states <- c("Idaho", "New Hampshire", "Rhode Island",
+                 "Nebraska", "Maine", "Hawaii", "Nevada")
+
+death_clean %>%
+  filter(state %in% rare_states) 
 ```
 
 ```{r}
@@ -227,6 +238,7 @@ death_weather <- death_clean %>%
   )
 
 glimpse(death_weather)
+
 ```
 ```{r}
 clean_df <- death_weather %>%
@@ -238,6 +250,8 @@ clean_df <- death_weather %>%
     tmean_week_C,
     tmean_week_F
   )
+
+write.csv(clean_df,"weatherDeath.csv")
 ```
 
 ```{r}

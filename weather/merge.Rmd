@@ -1,0 +1,316 @@
+---
+title: "age"
+output: html_document
+date: "2025-11-30"
+---
+
+
+
+```{r include=FALSE}
+library(readr)
+library(stringr)
+library(lubridate)
+library(MMWRweek)
+library(ggplot2)
+X2018 <- read_csv("2018.csv")
+X2019 <- read_csv("2019.csv")
+X2020 <- read_csv("2020.csv")
+X2021 <- read_csv("2021.csv")
+X2022 <- read_csv("2022.csv")
+X2023 <- read_csv("2023.csv")
+```
+```{r}
+library(dplyr)
+death_all <- bind_rows(
+  X2018,
+  X2019,
+  X2020,
+  X2021,
+  X2022,
+  X2023
+)
+
+write.csv(death_all,"death_all.csv")
+```
+
+```{r}
+weekly_temp <- read_csv("weekly_temp.csv")
+```
+
+
+
+
+```{r}
+weather_clean <- weekly_temp %>%
+  # if your column is named differently, change week_start here
+  mutate(
+    year  = year(week_start),
+    week  = sprintf("%02d", isoweek(week_start)),  # 1 → "01", etc.
+    week_code = paste0(year, "/", week)
+  ) %>%
+  select(state, week_code, everything())
+```
+
+```{r}
+death_clean <- death_all %>%
+  rename(
+    state     = `Residence State`,
+    week_code = `MMWR Week Code`
+  )
+
+```
+
+```{r}
+death_weather <- death_clean %>%
+  left_join(
+    weather_clean,
+    by = c("state", "week_code")
+  )
+
+glimpse(death_weather)
+```
+
+
+```{r}
+merged <- death_weather %>%
+  mutate(
+    age_group3 = case_when(
+      `Ten-Year Age Groups Code` %in% c("Under 1 year", "1-4", "5-14") ~ "<15",
+      `Ten-Year Age Groups Code` %in% c("15-24", "25-34", "35-44", "45-54", "55-64") ~ "15-64",
+      `Ten-Year Age Groups Code` %in% c("65-74", "75-84", "85+") ~ "65+",
+      TRUE ~ NA_character_
+    ),
+    age_group3 = factor(age_group3, levels = c("<15", "15-64", "65+"))
+  )
+```
+
+```{r}
+clean_df <- merged %>%
+  select(
+    state,
+    week_code,
+    week_start,
+    Deaths,
+    tmean_week_C,
+    tmean_week_F,
+    age_group3
+  )
+
+write.csv(clean_df,"weatherAge.csv")
+```
+
+```{r}
+merged_clean <- merged %>%
+  filter(
+    !is.na(tmean_week_C),
+    !is.na(Deaths),
+    is.finite(tmean_week_C)
+  )
+```
+
+## Modeling
+
+```{r}
+glimpse(clean_df)
+```
+```{r}
+merged <- clean_df %>%
+  mutate(
+    month = month(week_start),
+    season = case_when(
+      month %in% c(12, 1, 2) ~ "Winter",
+      month %in% c(3, 4, 5) ~ "Spring",
+      month %in% c(6, 7, 8) ~ "Summer",
+      month %in% c(9, 10, 11) ~ "Fall",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+### Simple global relationship (Deaths ~ Temperature)
+
+```{r}
+library(MASS)
+
+model1 <- glm.nb(
+  Deaths ~ tmean_week_C,
+  data = merged
+)
+
+summary(model1)
+```
+```{r}
+overall_effect <- (exp(coef(model1)["tmean_week_C"]) - 1) * 100
+overall_effect
+```
+Each 1°C increase in weekly temperature is associated with 0.15% increase in weekly deaths.
+
+### Adjust for and state
+
+```{r}
+model2 <- glm.nb(
+  Deaths ~ tmean_week_C + state + season,
+  data = merged
+)
+
+summary(model2)
+```
+
+### Relationship for specific age groups
+
+```{r}
+model_age <- glm.nb(
+  Deaths ~ tmean_week_C * age_group3,
+  data = merged
+)
+
+summary(model_age)
+```
+```{r}
+# Effect for <15 (baseline)
+exp(coef(model_age)["tmean_week_C"]) - 1
+
+# Effect for 15-64
+exp(coef(model_age)["tmean_week_C"] +
+    coef(model_age)["tmean_week_C:age_group315-64"]) - 1
+
+# Effect for 65+
+exp(coef(model_age)["tmean_week_C"] +
+    coef(model_age)["tmean_week_C:age_group365+"]) - 1
+```
+```{r}
+ggplot(merged_clean, aes(tmean_week_C, Deaths, color = age_group3)) +
+  geom_point(alpha = 0.15) +
+  geom_smooth(method = "glm",
+              method.args = list(family = MASS::negative.binomial(theta = model_age$theta))) +
+  theme_minimal() +
+  labs(
+    title = "Temperature–Death Relationship by Age Group",
+    x = "Weekly Temperature (°C)",
+    y = "Deaths"
+  )
+```
+### Random slopes by state
+
+```{r}
+library(glmmTMB)
+
+model_state_rs <- glmmTMB(
+  Deaths ~ tmean_week_C + (tmean_week_C | state),
+  family = nbinom2,
+  data = merged_clean
+)
+
+summary(model_state_rs)
+```
+The intercept of the model was 2.58 (SE = 0.043, p < 0.001), which corresponds to an expected 13.2 deaths per week when mean temperature is 0°C, for a state with average random effects. Random intercept variance (0.0497) indicates modest between-state variation in baseline mortality. The fixed temperature effect was −0.00376 (p = 2.1 × 10⁻⁸), implying that each 1°C increase in weekly mean temperature is associated with a 0.37% decrease in weekly mortality on average. Random slopes showed minimal state-to-state heterogeneity (SD = 0.002).
+
+Interpretation:
+
+Average temperature effect
+
+How much states differ in their temp sensitivity
+
+Which states are more heat/cold-sensitive
+
+Extract state-specific temperature effects:
+
+```{r}
+library(broom.mixed)
+
+state_effects <- broom.mixed::tidy(model_state_rs, effects = "ran_vals") %>%
+  filter(term == "tmean_week_C") %>%
+  mutate(
+    temp_slope = estimate + fixef(model_state_rs)$cond["tmean_week_C"],
+    pct_change = (exp(temp_slope) - 1) * 100
+  )
+
+state_effects
+```
+
+```{r}
+
+ggplot(state_effects, aes(x = pct_change, y = reorder(level, pct_change))) +
+  geom_point(size = 2) +
+  labs(
+    title = "State-Specific Temperature Effects on Weekly Deaths",
+    x = "% change in deaths per 1°C",
+    y = "State"
+  ) +
+  theme_minimal()
+```
+
+### Nonlinear temperature–death curve 
+```{r}
+library(mgcv)
+
+model4 <- gam(
+  Deaths ~ s(tmean_week_C, k = 10) + state + season,
+  family = nb(),
+  data = merged
+)
+
+summary(model4)
+```
+
+```{r}
+
+
+# Check that the range now works:
+range(merged_clean$tmean_week_C)
+```
+```{r}
+model_nb <- glm.nb(
+  Deaths ~ tmean_week_C,
+  data = merged_clean
+)
+
+summary(model_nb)
+```
+
+```{r}
+library(ggplot2)
+
+
+ggplot(merged_clean, aes(tmean_week_C, Deaths)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(method = "glm",
+              method.args = list(family = MASS::negative.binomial(theta = model_nb$theta))) +
+  labs(
+    x = "Weekly mean temperature (°C)",
+    y = "Weekly deaths",
+    title = "Relationship between temperature and deaths"
+  ) +
+  theme_minimal()
+```
+### seq() + prediction curve
+
+```{r}
+temp_vals <- data.frame(
+  tmean_week_C = seq(
+    min(merged_clean$tmean_week_C),
+    max(merged_clean$tmean_week_C),
+    length.out = 300
+  )
+)
+
+temp_vals$pred_deaths <- predict(
+  model_nb,
+  newdata = temp_vals,
+  type = "response"
+)
+
+ggplot(temp_vals, aes(tmean_week_C, pred_deaths)) +
+  geom_line(size = 1.2) +
+  labs(
+    x = "Weekly mean temperature (°C)",
+    y = "Predicted deaths",
+    title = "Predicted deaths vs temperature"
+  ) +
+  theme_minimal()
+```
+### Cutoff
+
+
+
+

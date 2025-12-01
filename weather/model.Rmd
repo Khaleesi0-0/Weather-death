@@ -1,0 +1,396 @@
+---
+title: "corrlation"
+output: html_document
+date: "2025-11-30"
+---
+
+```{r setup, include=FALSE}
+library(noaa)
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(openmeteo)
+library(readr)
+```
+
+## R Markdown
+
+```{r cars}
+death <- read_csv("weatherDeath.csv")
+
+glimpse(death)
+```
+```{r}
+death <- death %>%
+  mutate(
+    month = month(week_start),
+    season = case_when(
+      month %in% c(12, 1, 2) ~ "Winter",
+      month %in% c(3, 4, 5) ~ "Spring",
+      month %in% c(6, 7, 8) ~ "Summer",
+      month %in% c(9, 10, 11) ~ "Fall",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+
+
+```{r}
+library(MASS)
+
+model_nb <- glm.nb(
+  Deaths ~ tmean_week_C + state + season,
+  data = death
+)
+
+summary(model_nb)
+```
+
+```{r}
+model_pois <- glm(
+  Deaths ~ tmean_week_C + state + season,
+  data = death,
+  family = poisson()
+)
+
+summary(model_pois)
+```
+
+```{r}
+death %>%
+  group_by(season) %>%
+  summarize(correlation = cor(Deaths, tmean_week_C))
+```
+```{r}
+death %>%
+  group_by(season) %>%
+  summarize(mean_deaths = mean(Deaths),
+            mean_temp = mean(tmean_week_C))
+
+```
+
+```{r}
+death %>%
+  group_by(state, season) %>%
+  summarize(mean_deaths = mean(Deaths),
+            mean_temp = mean(tmean_week_C),
+            n = n())
+```
+```{r}
+library(ggplot2)
+
+ggplot(death, aes(tmean_week_C, Deaths, color = season)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "loess") +
+  theme_minimal()
+```
+```{r}
+model_nb <- glm.nb(
+  Deaths ~ tmean_week_C + state + season,
+  data = death
+)
+
+summary(model_nb)
+```
+
+```{r}
+library(ggeffects)
+library(ggplot2)
+
+library(broom)
+
+coef_df <- broom::tidy(model_nb) %>%
+  filter(grepl("^state", term)) %>%
+  mutate(state = gsub("state", "", term))
+
+ggplot(coef_df, aes(estimate, reorder(state, estimate))) +
+  geom_point(color = "#e31a1c", size = 2.5) +
+  geom_errorbarh(aes(xmin = estimate - std.error,
+                     xmax = estimate + std.error),
+                 height = 0.2) +
+  labs(
+    title = "State-Level Effects on Deaths (Adjusted)",
+    x = "Effect on log(Deaths)",
+    y = "State"
+  ) +
+  theme_minimal(base_size = 13)
+
+
+```
+
+```{r}
+library(broom)
+library(dplyr)
+library(ggplot2)
+library(sf)
+library(stringr)
+
+# 1. Extract state coefficients
+coef_state <- broom::tidy(model_nb) %>%
+  dplyr::filter(str_detect(term, "^state")) %>%
+  dplyr::mutate(
+    state = gsub("^state", "", term)
+  ) %>%
+  dplyr::select(state, estimate)
+
+# 2. Add baseline state (Alabama is reference level)
+baseline <- tibble(
+  state = "Alabama",
+  estimate = 0
+)
+
+coef_state_full <- dplyr::bind_rows(coef_state, baseline)
+
+# 3. Load US state shapes (sf)
+us_states <- st_as_sf(maps::map("state", fill = TRUE, plot = FALSE))
+us_states$state <- tools::toTitleCase(us_states$ID)
+
+# IMPORTANT: fix state name mismatches
+coef_state_full <- coef_state_full %>%
+  dplyr::mutate(state = case_when(
+    state == "District of Columbia" ~ "District Of Columbia",
+    TRUE ~ state
+  ))
+
+# 4. Join coefficients to spatial data
+map_df <- us_states %>%
+  dplyr::left_join(coef_state_full, by = "state")
+
+# 5. Plot
+ggplot(map_df) +
+  geom_sf(aes(fill = estimate), color = "white", size = 0.2) +
+  scale_fill_gradient2(
+    low = "blue",
+    high = "red",
+    mid = "white",
+    midpoint = 0,
+    na.value = "grey90",
+    name = "Effect on log(Deaths)"
+  ) +
+  labs(
+    title = "State Effects on Deaths\nAdjusted for Temperature and Season",
+    fill = "Coefficient"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text = element_blank(),
+    panel.grid = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+```
+```{r}
+library(dplyr)
+
+library(ggeffects)
+library(ggplot2)
+
+p <- ggpredict(model_nb, terms = "tmean_week_C")
+
+ggplot(p, aes(x, predicted)) +
+  geom_line(size = 1.2, color = "blue") +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2) +
+  labs(
+    x = "Temperature (°C)",
+    y = "Predicted Weekly Deaths",
+    title = "Negative Binomial Model: Effect of Temperature on Deaths"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+model_nb <- glm.nb(
+  Deaths ~ tmean_week_C,
+  data = death
+)
+
+summary(model_nb)
+```
+```{r}
+death_clean <- death %>%
+  filter(
+    !is.na(tmean_week_C),
+    !is.na(Deaths),
+    is.finite(tmean_week_C)
+  )
+```
+
+```{r}
+library(mgcv)
+
+model_gam <- gam(
+  Deaths ~ s(tmean_week_C, k = 10),
+  family = nb(),
+  data = death_clean
+)
+```
+
+```{r}
+temp_range <- range(death_clean$tmean_week_C, na.rm = TRUE)
+
+temp_grid <- data.frame(
+  tmean_week_C = seq(temp_range[1], temp_range[2], length.out = 500)
+)
+```
+
+```{r}
+pred <- predict(model_gam, newdata = temp_grid, type = "link", se.fit = TRUE)
+
+# numeric derivative of the smooth effect wrt temperature
+derivative <- diff(pred$fit) / diff(temp_grid$tmean_week_C)
+
+# index where derivative changes sign (increase → decrease or vice versa)
+sign_change_index <- which(diff(sign(derivative)) != 0)
+
+cut_points <- temp_grid$tmean_week_C[sign_change_index]
+cut_points
+
+```
+
+```{r}
+plot_df <- data.frame(
+  tmean_week_C = temp_grid$tmean_week_C,
+  fit = pred$fit
+)
+
+ggplot(plot_df, aes(tmean_week_C, fit)) +
+  geom_line() +
+  geom_vline(xintercept = cut_points, linetype = "dashed", color = "red") +
+  labs(
+    x = "Temperature (°C)",
+    y = "Smooth effect on log(Deaths)",
+    title = "Nonlinear Temperature Effect with Cut-point(s)"
+  ) +
+  theme_minimal()
+```
+```{r}
+death_ca <- death %>%
+  filter(state == "California") %>%
+  filter(!is.na(tmean_week_C),
+         !is.na(Deaths),
+         is.finite(tmean_week_C))
+
+## Optional: check range
+summary(death_ca$tmean_week_C)
+
+## 2. Fit a GAM for California ----
+model_gam_ca <- gam(
+  Deaths ~ s(tmean_week_C, k = 10),
+  family = nb(),         # negative binomial
+  data = death_ca
+)
+
+summary(model_gam_ca)
+
+## 3. Build temperature grid & predict smooth ----
+temp_range_ca <- range(death_ca$tmean_week_C, na.rm = TRUE)
+
+temp_grid_ca <- data.frame(
+  tmean_week_C = seq(temp_range_ca[1], temp_range_ca[2], length.out = 500)
+)
+
+pred_ca <- predict(
+  model_gam_ca,
+  newdata = temp_grid_ca,
+  type = "link",   # smooth on log scale
+  se.fit = TRUE
+)
+
+## 4. Approximate derivative & find cut-point(s) ----
+derivative_ca <- diff(pred_ca$fit) / diff(temp_grid_ca$tmean_week_C)
+
+# indices where slope changes sign
+sign_change_index_ca <- which(diff(sign(derivative_ca)) != 0)
+
+cut_points_ca <- temp_grid_ca$tmean_week_C[sign_change_index_ca]
+cut_points_ca
+# This prints the temperature(s) where the curve switches direction
+
+## 5. Prepare data for plotting ----
+plot_df_ca <- data.frame(
+  tmean_week_C = temp_grid_ca$tmean_week_C,
+  fit = pred_ca$fit
+)
+
+## 6. Plot smooth effect + cut-point(s) ----
+ggplot(plot_df_ca, aes(x = tmean_week_C, y = fit)) +
+  geom_line(size = 1) +
+  geom_vline(xintercept = cut_points_ca,
+             linetype = "dashed",
+             color = "red") +
+  labs(
+    title = "Nonlinear Effect of Temperature on Deaths in California",
+    subtitle = "Red dashed line(s) show temperature cut-point(s)",
+    x = "Temperature (°C)",
+    y = "Smooth effect on log(Deaths)"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
+```{r}
+death_ca <- death %>%
+  filter(state == "Florida") %>%
+  filter(!is.na(tmean_week_C),
+         !is.na(Deaths),
+         is.finite(tmean_week_C))
+
+## Optional: check range
+summary(death_ca$tmean_week_C)
+
+## 2. Fit a GAM for California ----
+model_gam_ca <- gam(
+  Deaths ~ s(tmean_week_C, k = 10),
+  family = nb(),         # negative binomial
+  data = death_ca
+)
+
+summary(model_gam_ca)
+
+## 3. Build temperature grid & predict smooth ----
+temp_range_ca <- range(death_ca$tmean_week_C, na.rm = TRUE)
+
+temp_grid_ca <- data.frame(
+  tmean_week_C = seq(temp_range_ca[1], temp_range_ca[2], length.out = 500)
+)
+
+pred_ca <- predict(
+  model_gam_ca,
+  newdata = temp_grid_ca,
+  type = "link",   # smooth on log scale
+  se.fit = TRUE
+)
+
+## 4. Approximate derivative & find cut-point(s) ----
+derivative_ca <- diff(pred_ca$fit) / diff(temp_grid_ca$tmean_week_C)
+
+# indices where slope changes sign
+sign_change_index_ca <- which(diff(sign(derivative_ca)) != 0)
+
+cut_points_ca <- temp_grid_ca$tmean_week_C[sign_change_index_ca]
+cut_points_ca
+# This prints the temperature(s) where the curve switches direction
+
+## 5. Prepare data for plotting ----
+plot_df_ca <- data.frame(
+  tmean_week_C = temp_grid_ca$tmean_week_C,
+  fit = pred_ca$fit
+)
+
+## 6. Plot smooth effect + cut-point(s) ----
+ggplot(plot_df_ca, aes(x = tmean_week_C, y = fit)) +
+  geom_line(size = 1) +
+  geom_vline(xintercept = cut_points_ca,
+             linetype = "dashed",
+             color = "red") +
+  labs(
+    title = "Nonlinear Effect of Temperature on Deaths in California",
+    subtitle = "Red dashed line(s) show temperature cut-point(s)",
+    x = "Temperature (°C)",
+    y = "Smooth effect on log(Deaths)"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
