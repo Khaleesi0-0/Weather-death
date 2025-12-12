@@ -5,25 +5,349 @@ date: "2025-12-11"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(splines)
+library(broom) 
+
+weatherAge <- read_csv("weatherAge.csv") %>%
+  arrange(state, week_start)
+
+
+```
+```{r}
+daily_temp <- daily_temp %>%
+  group_by(state) %>%
+  mutate(
+    p95_state = quantile(tmean_day_C, probs = 0.95, na.rm = TRUE),
+    hot_day   = tmean_day_C > p95_state
+  ) %>%
+  ungroup()
+
+# 2. find runs of ≥3 consecutive hot days within each state
+daily_temp <- daily_temp %>%
+  arrange(state, date) %>%
+  group_by(state) %>%
+  mutate(
+    grp = cumsum(!hot_day),                # breaks when hot_day == FALSE
+    run_len = ave(hot_day, grp, FUN = sum),
+    in_3day_heat = hot_day & run_len >= 3  # TRUE only for days in a 3+ run
+  ) %>%
+  ungroup()
+
 ```
 
-## R Markdown
+```{r}
+add_ete <- function(df,
+                    temp_var = tmean_week_C,
+                    type = c("heat", "cold"),
+                    p = 0.95,
+                    min_run = 3,
+                    suffix = NULL) {
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+  type <- match.arg(type)
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+  if (is.null(suffix)) {
+    suffix <- paste0(
+      ifelse(type == "heat", "heat", "cold"),
+      "_P", p*100, "_", min_run, "w"
+    )
+  }
 
-```{r cars}
-summary(cars)
+  df %>%
+    group_by(state) %>%
+    arrange(state, week_start) %>%
+    mutate(
+      # Clean temperature vector to avoid NA/NaN in quantile
+      .temp_clean = {{ temp_var }},
+      .thresh = quantile(.temp_clean[!is.na(.temp_clean)],
+                         probs = p,
+                         na.rm = TRUE),
+
+      # Identify extreme weeks
+      .is_extreme = dplyr::case_when(
+        type == "heat" & {{ temp_var }} >= .thresh ~ TRUE,
+        type == "cold" & {{ temp_var }} <= .thresh ~ TRUE,
+        TRUE ~ FALSE
+      ),
+
+      # Run IDs
+      .run_id = cumsum(
+        .is_extreme != dplyr::lag(.is_extreme, default = first(.is_extreme))
+      ),
+
+      # Run length
+      .run_len = if_else(
+        .is_extreme,
+        as.integer(ave(.is_extreme, .run_id, FUN = length)),
+        0L
+      ),
+
+      "{suffix}" := as.integer(.is_extreme & .run_len >= min_run)
+    ) %>%
+    ungroup() %>%
+    select(-.temp_clean, -.thresh, -.is_extreme, -.run_id, -.run_len)
+}
+
 ```
 
-## Including Plots
+```{r}
+weatherAge_ete <- weatherAge %>%
+  # Heat wave: weeks where temp ≥ state-specific 95th percentile
+  # and belong to a run of ≥3 such weeks
+  add_ete(type = "heat", p = 0.95, min_run = 3, suffix = "heat_P95_3w") %>%
+  # Cold spell: weeks where temp ≤ state-specific 5th percentile
+  # and belong to a run of ≥3 such weeks
+  add_ete(type = "cold", p = 0.05, min_run = 3, suffix = "cold_P5_3w")
 
-You can also embed plots, for example:
+```
+```{r}
+weatherAge_ete <- weatherAge_ete %>%
+  mutate(
+    year = year(week_start),
+    week = isoweek(week_start)
+  )
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+# Example: pooled over age groups
+model_ete <- glm(
+  Deaths ~ heat_P95_3w + cold_P5_3w +
+    ns(tmean_week_C, df = 3) +                # control for temp as continuous
+    factor(state) +                           # state fixed effects
+    factor(year) + factor(week),              # control for long-term + seasonality
+  family = quasipoisson(link = "log"),
+  data   = weatherAge_ete
+)
+
+summary(model_ete)
+
+```
+```{r}
+weatherAge_ete <- weatherAge_ete %>%
+  arrange(state, week_start) %>%
+  mutate(
+    year = year(week_start),
+    week = isoweek(week_start)
+  )
+
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+## Plots: heat/cold spells over time
+```{r}
+example_state <- "California"     # change if needed
+example_age   <- "65+"            # or "15-64", etc.
+
+plot_ts_state <- weatherAge_ete %>%
+  filter(state == example_state,
+         age_group3 == example_age) %>%
+  mutate(
+    ete_type = case_when(
+      heat_P95_3w == 1 ~ "Heat wave",
+      cold_P5_3w == 1 ~ "Cold spell",
+      TRUE             ~ "None"
+    )
+  ) %>%
+  ggplot(aes(x = week_start)) +
+  # temperature line
+  geom_line(aes(y = tmean_week_C), linewidth = 0.5) +
+  # points for ETEs
+  geom_point(aes(y = tmean_week_C, color = ete_type), size = 1.8) +
+  scale_color_manual(values = c(
+    "Heat wave" = "red",
+    "Cold spell" = "blue",
+    "None" = "grey60"
+  )) +
+  labs(
+    title = paste0("Weekly mean temperature & ETEs, ", example_state,
+                   " (", example_age, ")"),
+    x = "Week",
+    y = "Mean weekly temperature (°C)",
+    color = "ETE type"
+  ) +
+  theme_minimal()
+
+plot_ts_state
+
+```
+
+```{r}
+library(forcats)  # just to be explicit
+
+ete_long <- weatherAge_ete %>%
+  mutate(
+    ete_type = case_when(
+      heat_P95_3w == 1 ~ "Heat wave",
+      cold_P5_3w == 1 ~ "Cold spell",
+      TRUE             ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(ete_type)) %>%
+  mutate(
+    state = factor(state)  # optional but nice to fix ordering
+  )
+
+plot_tile_all <- ete_long %>%
+  ggplot(aes(x = week_start, y = state)) +   # <- no fct_reorder
+  geom_tile(aes(fill = ete_type), height = 0.9) +
+  scale_fill_manual(values = c("Heat wave" = "red", "Cold spell" = "blue")) +
+  labs(
+    title = "Extreme temperature events (P95 heat, P5 cold; ≥3 weeks)",
+    x = "Week",
+    y = "State",
+    fill = "ETE type"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 6)
+  )
+
+plot_tile_all
+
+ggsave("Extreme temperature events.png",plot_tile_all,width = 10, height = 6, dpi = 300)
+```
+
+## Sensitivity
+
+```{r}
+fit_ete_sensitivity <- function(df, p, min_run) {
+  suffix <- paste0("heat_P", p * 100, "_", min_run, "w")
+
+  df_tmp <- df %>%
+    add_ete(type = "heat", p = p, min_run = min_run, suffix = suffix) %>%
+    mutate(
+      year = year(week_start),
+      week = isoweek(week_start)
+    )
+
+  formula_str <- paste0(
+    "Deaths ~ ", suffix,
+    " + ns(tmean_week_C, df = 3) + factor(state) + factor(year) + factor(week)"
+  )
+
+  mod <- glm(
+    as.formula(formula_str),
+    family = quasipoisson(),
+    data   = df_tmp
+  )
+
+  beta  <- coef(mod)[suffix]
+  se    <- sqrt(vcov(mod)[suffix, suffix])
+  RR    <- exp(beta)
+  lower <- exp(beta - 1.96 * se)
+  upper <- exp(beta + 1.96 * se)
+
+  tibble(
+    p       = p,
+    min_run = min_run,
+    term    = suffix,
+    beta    = beta,
+    se      = se,
+    RR      = RR,
+    RR_low  = lower,
+    RR_high = upper
+  )
+}
+
+```
+
+```{r}
+grid <- crossing(
+  p       = c(0.90, 0.95),
+  min_run = c(2, 3, 4)
+)
+
+sens_results <- map2_dfr(
+  grid$p, grid$min_run,
+  ~ fit_ete_sensitivity(weatherAge, p = .x, min_run = .y)
+)
+
+sens_results
+
+```
+```{r}
+p_sens <- sens_results %>%
+  mutate(p_label = paste0("P", p * 100)) %>%
+  ggplot(aes(
+    x = factor(min_run),
+    y = RR,
+    ymin = RR_low,
+    ymax = RR_high,
+    group = p_label,
+    color = p_label
+  )) +
+  geom_pointrange(position = position_dodge(width = 0.3)) +  # <- fixed here
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  labs(
+    x = "Minimum consecutive weeks in ETE",
+    y = "Rate ratio for deaths (ETE vs non-ETE)",
+    color = "Percentile",
+    title = "Sensitivity of heat-wave effect to ETE definition"
+  ) +
+  theme_minimal()
+
+p_sens 
+ggsave(
+  filename = "sensitivity_heatwave.png",
+  plot = p_sens,
+  width = 8, height = 5, dpi = 300
+)
+
+
+```
+
+## Age group
+
+```{r}
+weatherAge_ete_clean <- weatherAge_ete %>%
+  filter(
+    is.finite(tmean_week_C),        # removes NA, NaN, Inf
+    !is.na(heat_P95_3w),
+    !is.na(cold_P5_3w)
+  )
+
+```
+
+```{r}
+models_by_age <- weatherAge_ete_clean %>%
+  group_by(age_group3) %>%
+  group_map(~ glm(
+    Deaths ~ heat_P95_3w + cold_P5_3w +
+      ns(tmean_week_C, df = 3) +
+      factor(state) + factor(year) + factor(week),
+    family = quasipoisson(),
+    data   = .x
+  ))
+
+names(models_by_age) <- weatherAge_ete_clean %>%
+  distinct(age_group3) %>% pull()
+
+models_by_age
+```
+```{r}
+extract_effects <- function(model, age_group) {
+  co <- coef(summary(model))
+  
+  tibble(
+    age_group = age_group,
+    term      = rownames(co),
+    estimate  = co[, "Estimate"],
+    se        = co[, "Std. Error"],
+    p_value   = co[, "Pr(>|t|)"],
+    RR        = exp(estimate),
+    RR_low    = exp(estimate - 1.96 * se),
+    RR_high   = exp(estimate + 1.96 * se)
+  ) %>%
+    filter(term %in% c("heat_P95_3w", "cold_P5_3w"))
+}
+
+results_by_age <- map2_dfr(
+  models_by_age,
+  names(models_by_age),
+  extract_effects
+)
+
+results_by_age
+
+```
+
