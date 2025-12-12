@@ -13,29 +13,90 @@ library(broom)
 weatherAge <- read_csv("weatherAge.csv") %>%
   arrange(state, week_start)
 
+daily_temp <- read_csv("daily_temps.csv")
 
 ```
 ```{r}
+daily_temp <- daily_temp %>% 
+  # give useful names if needed
+  rename(
+    state       = 2,
+    date        = 3,
+    tmean_day_C = 4
+  ) %>%
+  mutate(
+    date = as.Date(date)
+  ) %>%
+  filter(year(date) >= 2018, year(date) <= 2023)
+
+# 2. find runs of ≥3 consecutive hot days within each state
 daily_temp <- daily_temp %>%
   group_by(state) %>%
   mutate(
     p95_state = quantile(tmean_day_C, probs = 0.95, na.rm = TRUE),
-    hot_day   = tmean_day_C > p95_state
+    p5_state  = quantile(tmean_day_C, probs = 0.05, na.rm = TRUE),
+    hot_day   = tmean_day_C > p95_state,
+    cold_day  = tmean_day_C < p5_state
   ) %>%
   ungroup()
 
-# 2. find runs of ≥3 consecutive hot days within each state
+
+```
+
+```{r}
 daily_temp <- daily_temp %>%
   arrange(state, date) %>%
   group_by(state) %>%
+  # heat runs
   mutate(
-    grp = cumsum(!hot_day),                # breaks when hot_day == FALSE
-    run_len = ave(hot_day, grp, FUN = sum),
-    in_3day_heat = hot_day & run_len >= 3  # TRUE only for days in a 3+ run
+    hot_day      = replace_na(hot_day, FALSE),
+    hot_run_id   = cumsum(hot_day != lag(hot_day, default = first(hot_day))),
+    hot_run_len  = ave(hot_day, hot_run_id, FUN = sum),
+    in_heat_3d   = hot_day & hot_run_len >= 3
+  ) %>%
+  # cold runs
+  mutate(
+    cold_day     = replace_na(cold_day, FALSE),
+    cold_run_id  = cumsum(cold_day != lag(cold_day, default = first(cold_day))),
+    cold_run_len = ave(cold_day, cold_run_id, FUN = sum),
+    in_cold_3d   = cold_day & cold_run_len >= 3
   ) %>%
   ungroup()
 
 ```
+
+```{r}
+daily_weeks <- daily_temp %>%
+  mutate(
+    week_start = floor_date(date, unit = "week", week_start = 1)  # Monday weeks
+  ) %>%
+  group_by(state, week_start) %>%
+  summarise(
+    heat_3day = as.integer(any(in_heat_3d, na.rm = TRUE)),
+    cold_3day = as.integer(any(in_cold_3d, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+```
+
+```{r}
+weatherAge_3day <- weatherAge %>%
+  left_join(daily_weeks, by = c("state", "week_start"))
+
+```
+
+```{r}
+model_3day <- glm(
+  Deaths ~ heat_3day + cold_3day +
+    ns(tmean_week_C, df = 3) +
+    factor(state) + factor(year) + factor(week),
+  family = quasipoisson(link = "log"),
+  data   = weatherAge_3day
+)
+
+summary(model_3day)
+```
+
 
 ```{r}
 add_ete <- function(df,
